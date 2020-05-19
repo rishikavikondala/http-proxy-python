@@ -12,34 +12,54 @@ def parse_message(data):
     # initialize empty dictionary
     message = {}
 
-    length, raw_request = get_request(data)
-    parsed_request = raw_request.split(' ')
+    length, raw_request = get_fields(data)
+    parsed_request = raw_request.split(' ', 2)
 
     # parse bytes and assign key / value pairs
     message['method'] = parsed_request[0] # HTTP method name such as GET
-    message['uri'] = parsed_request[1] # request_partsaddress or resource name from the request, such as www.uw.edu
+    message['uri'] = parsed_request[1] # request_parts address or resource name from the request, such as www.uw.edu
     message['version'] = parsed_request[2] # HTTP version such as HTTP/1.0
-    message['headers'] = parse_headers(length, data) # List of headers
+    try:
+        message['headers'] = parse_headers(length, data) # List of headers
+        # If parsing is successful, return a completed message (if applicable) and unused bytes
+        return message, None
+    except:
+        # If parsing fails, return the entire buffer and an indicator that parsing was incomplete
+        return None, data
 
-    # If parsing is successful, return a completed message (if applicable) and unused bytes
-    return message, None
-
-    # If parsing fails, return the entire buffer and an indicator that parsing was incomplete
-    return None, data
-
-def get_request(data):
+def get_fields(data):
     raw_req = data.decode('utf-8')
     split_req = raw_req.partition('\n')
     return len(split_req[0]), split_req[0].strip()
 
+def parse_line(data, encoding = 'iso-8859-1'):
+    fields = data.partition('\n')
+    if len(fields[1]) == 0:
+        return None, data
+    line = fields[0].rstrip('\r')
+    if len(fields[2]) == 0:
+        return line, None
+    return line, fields[2]
+
 def parse_headers(index, data):
-    data = data[index+1:].decode('utf-8')
-    raw_headers = data.split('\n')
-    parsed_headers = {}
-    for i in range(len(raw_headers)):
-        this_header = raw_headers[i].split(':')
-        parsed_headers[this_header[0].strip()] = this_header[1].strip()
-    return parsed_headers
+    headers = {}
+    data = data[index+1:].decode('iso-8859-1')
+    line, unparsed = parse_line(data)
+    while line != '':
+        if line is None:
+            raise Exception
+        else:
+            parts = line.split(':')
+            headers[parts[0]] = parts[1].strip()
+        line, unparsed = parse_line(unparsed)
+    return headers    
+
+def print_summary(message,  address):
+    print("Connection source: " + address)
+    print("HTTP method: " + message['method'])
+    print("Destination: " + message['uri'])
+    print("Headers: ")
+    print(message['headers'])
 
 def main():
     # register arguments 
@@ -58,20 +78,17 @@ def main():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((HOST_ADDRESS, PORT_NUMBER))
         s.listen()
-        buffer = b''
         while True:
             conn, addr = s.accept()
             with conn:
-                message, unused = parse_message(buffer)
-                # Connection Source: \<IP address returned from the call to Socket.accept()>
-                print(message['method'])
-                print(message['uri'])
-                print(message['headers'])
-
-    # data = b'GET http://neverssl.com/ HTTP/1.1\nHost: neverssl.com\nConnection: keep-alive\nUpgrade-Insecure-Requests: 1\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.109 Safari/537.36\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\nAccept-Encoding: gzip, deflate, br\nAccept-Language: en-US,en;q=0.9'
-    # length, req = get_request(data)
-    # print(req)
-    # print(parse_headers(length, data))
+                buffer = b''
+                while True:
+                    data = conn.recv(1024)
+                    if not data:
+                        break
+                    buffer = buffer + data
+            parsed_message, remainder = parse_message(buffer)
+            print_summary(parsed_message, addr[0])
 
 # if statement so main() runs by default from command line
 if __name__=="__main__":
