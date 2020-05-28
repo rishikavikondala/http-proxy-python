@@ -4,29 +4,16 @@
 import argparse
 import json
 import socket
+from urllib.parse import urlparse
 
 # define classes, enums, etc here
 
+# get length of buffer using len() function
+
+# TESTING
+# Print out the rebuilt message to see if it looks correct
+
 # define functions here
-def parse_message(data):
-    # initialize empty dictionary
-    message = {}
-
-    length, raw_request = get_fields(data)
-    parsed_request = raw_request.split(' ', 2)
-
-    # parse bytes and assign key / value pairs
-    message['method'] = parsed_request[0] # HTTP method name such as GET
-    message['uri'] = parsed_request[1] # request_parts address or resource name from the request, such as www.uw.edu
-    message['version'] = parsed_request[2] # HTTP version such as HTTP/1.0
-    try:
-        message['headers'] = parse_headers(length, data) # List of headers
-        # If parsing is successful, return a completed message (if applicable) and unused bytes
-        return message, None
-    except:
-        # If parsing fails, return the entire buffer and an indicator that parsing was incomplete
-        return None, data
-
 def get_fields(data):
     raw_req = data.decode('utf-8')
     split_req = raw_req.partition('\n')
@@ -41,18 +28,46 @@ def parse_line(data, encoding = 'iso-8859-1'):
         return line, None
     return line, fields[2]
 
-def parse_headers(index, data):
+def parse_headers(index, data, method):
     headers = {}
     data = data[index+1:].decode('iso-8859-1')
     line, unparsed = parse_line(data)
+    content_length = None
+    body = b''
     while line != '':
         if line is None:
             raise Exception
         else:
             parts = line.split(':')
             headers[parts[0]] = parts[1].strip()
+            if parts[0] == 'Content-Length':
+                content_length = int(parts[1].strip())
         line, unparsed = parse_line(unparsed)
-    return headers    
+    if content_length is not None and method != 'GET':
+        body = unparsed[0: content_length]
+    return headers, content_length, body
+
+def parse_message(data):
+    message = {}
+    length, raw_request = get_fields(data)
+    parsed_request = raw_request.split(' ', 2)
+    message['method'] = parsed_request[0]
+    message['uri'] = parsed_request[1]
+    message['version'] = parsed_request[2]
+    try:
+        headers, content_length, body = parse_headers(length, data, parsed_request[0])
+        message['headers'] = headers
+        if content_length != 0:
+            message['Content-Length'] = content_length
+        # if int(content_length) > 0:
+        #     # need to look at the unparsed portion of the buffer for the message body
+        # if # unparsed portion of buffer < content-length:
+        #     # return to the recv() loop and wait for the remaining data
+        # elif # unparsed portion of buffer > content-length:
+        #     # extra bytes should remain in the buffer 
+        return message, None, body
+    except:
+        return None, data, None
 
 def print_summary(message,  address):
     print("Connection source: " + address)
@@ -60,6 +75,42 @@ def print_summary(message,  address):
     print("Destination: " + message['uri'])
     print("Headers: ")
     print(message['headers'])
+
+# returns the host and port
+# run by doing:  h, p = parse_uri(dest)
+def parse_uri(uri):
+    uri_parts = urlparse(uri)
+    scheme = uri_parts.scheme
+    host = uri_parts.hostname
+    # urlparse can't deal with partial URI's that don't include the 
+    # protocol, e.g., push.services.mozilla.com:443
+    if host: # correctly parsed
+        if uri_parts.port:
+            port = uri_parts.port
+        else:
+            port = socket.getservbyname(scheme)
+    else: # incorrectly parsed
+        uri_parts = uri.split(':')
+        host = uri_parts[0]
+        if len(uri) > 1:
+            port = int(uri_parts[1])
+        else:
+            port = 80
+    return host, port
+
+def build_message(message, body):
+    # Please note that we are replacing the original version (this is intentional)
+    message_header = '{} {} {}\r\n'.format(message['method'], message['uri'], 'HTTP/1.0')
+    data = ''
+    for header in message['headers']:
+        data = data + '{}\r\n'.format(header + ': ' + message['headers'][header]) # Format each header properly
+    # Don't forget to add a terminating CRLF
+    data = data + '\r\n'
+    # Encode the header portion of the message as bytes
+    message_header = message_header.encode('iso-8859-1')
+    # Do you have a message body? Add it back now
+    data = data + body.decode('iso-8859-1')
+    return message_header + '\r\n'.encode('iso-8859-1') + data.encode('iso-8859-1')
 
 def main():
     # register arguments 
@@ -87,8 +138,18 @@ def main():
                     if not data:
                         break
                     buffer = buffer + data
-            parsed_message, remainder = parse_message(buffer)
-            print_summary(parsed_message, addr[0])
+                    parsed_message, remainder, body = parse_message(buffer)
+                    if parsed_message is not None:
+                        print_summary(parsed_message, addr[0])
+                        print('\n')
+                        host, port = parse_uri(parsed_message['uri'])
+                        print('Target: {}{}\n'.format(host, port))
+                        rebuilt = build_message(parsed_message, body)
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
+                            s2.connect((host, port))
+                            s2.sendall(rebuilt)
+                            print('Response: {}'.format(s2.recv(250)))
+                        break
 
 # if statement so main() runs by default from command line
 if __name__=="__main__":

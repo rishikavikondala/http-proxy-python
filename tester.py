@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 
-# add import statements here
 import argparse
 import json
 import socket
-
-# define classes, enums, etc here
-
-# define functions here
 
 def get_fields(data):
     raw_req = data.decode('utf-8')
@@ -23,14 +18,12 @@ def parse_line(data, encoding = 'iso-8859-1'):
         return line, None
     return line, fields[2]
 
-def parse_headers(index, data):
+def parse_headers(index, data, method):
     headers = {}
     data = data[index+1:].decode('iso-8859-1')
     line, unparsed = parse_line(data)
-    content_length = 0
+    content_length = None
     body = b''
-    if line == '':
-        x = 1
     while line != '':
         if line is None:
             raise Exception
@@ -40,7 +33,9 @@ def parse_headers(index, data):
             if parts[0] == 'Content-Length':
                 content_length = int(parts[1].strip())
         line, unparsed = parse_line(unparsed)
-    return headers, content_length
+    if content_length is not None and method != 'GET':
+        body = unparsed[0: content_length]
+    return headers, content_length, body
 
 def parse_message(data):
     message = {}
@@ -50,7 +45,7 @@ def parse_message(data):
     message['uri'] = parsed_request[1]
     message['version'] = parsed_request[2]
     try:
-        headers, content_length = parse_headers(length, data)
+        headers, content_length, body = parse_headers(length, data, parsed_request[0])
         message['headers'] = headers
         if content_length != 0:
             message['Content-Length'] = content_length
@@ -60,23 +55,22 @@ def parse_message(data):
         #     # return to the recv() loop and wait for the remaining data
         # elif # unparsed portion of buffer > content-length:
         #     # extra bytes should remain in the buffer 
-        return message, None
+        return message, None, body
     except:
         return None, data
 
 def main():
-    # write your main method code here
     data = b''
     with open("resources/post_request.http", "rb+") as f:
         data = f.read()
-    message, remainder = parse_message(data)
-    print(message['method'])
-    print(message['uri'])
-    print(message['version'])
-    print(message['headers'])
-    print(message['Content-Length'])
-    print(remainder)
+    message, remainder, body= parse_message(data)
+    # print(message['method'])
+    # print(message['uri'])
+    # print(message['version'])
+    # print(message['headers'])
+    # print(body)
+    for header in message['headers']:
+        print(header + ': ' + message['headers'][header])
 
-# if statement so main() runs by default from command line
 if __name__=="__main__":
     main()
