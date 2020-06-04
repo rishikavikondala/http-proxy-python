@@ -34,7 +34,6 @@ def parse_headers(index, data, method):
     line, unparsed = parse_line(data)
     content_length = None
     body = b''
-    #print(type(headers), type(content-length), type(body), type(line))
     while line != '':
         if line is None:
             raise Exception
@@ -50,6 +49,7 @@ def parse_headers(index, data, method):
         body = unparsed[0: content_length]
     return headers, content_length, body
 
+# parses HTTP messages' fields and headers
 def parse_message(data, message_type):
     message = {}
     length, raw_request = get_fields(data)
@@ -69,10 +69,11 @@ def parse_message(data, message_type):
         if content_length != 0:
             message['Content-Length'] = content_length
         return message, None, body
-    except Exception as E:
-        # print(E)
+    except:# Exception as E:
+        #print(E)
         return None, data, None
 
+# for testing/development: prints relevant information for a connection
 def print_summary(message,  address):
     print("Connection source: " + address)
     print("HTTP method: " + message['method'])
@@ -102,6 +103,7 @@ def parse_uri(uri):
             port = 80
     return host, port
 
+# rebuilds a parsed HTTP message
 def build_message(message, body):
     if message['type'] is MessageType.REQUEST:
         message_header = '{} {} {}\r\n'.format(message['method'], message['uri'], 'HTTP/1.0') # rebuild message header
@@ -115,26 +117,25 @@ def build_message(message, body):
     data = data + body # add body to message
     return message_header, message_header + data
 
-def response(host, dt, req_line, code, content_length, referer, user_agent):
+# prints out an HTTP access log with commonly used formatting
+def access_log(host, dt, req_line, code, content_length, referer, user_agent):
     response = '{} [{}] "{}" {} {} {} {}'.format(host, dt, req_line.decode('iso-8859-1').strip(), code, content_length, referer, user_agent)
     return response 
 
 def main():
     parser = argparse.ArgumentParser() 
     parser.add_argument('-p', '--port', type=int, help='TCP port for HTTP proxy', default=9999) # register argument
-
     args = parser.parse_args() # parse the command line
-
     HOST_ADDRESS = '127.0.0.1' # Set host
     PORT_NUMBER = args.port # Set port
 
     # Accept new connections
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((HOST_ADDRESS, PORT_NUMBER))
-        s.listen()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as request_socket:
+        request_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        request_socket.bind((HOST_ADDRESS, PORT_NUMBER))
+        request_socket.listen()
         while True:
-            conn, addr = s.accept()
+            conn, addr = request_socket.accept()
             with conn:
                 buffer = b''
                 while True:
@@ -145,29 +146,22 @@ def main():
                     request_message, remainder, body = parse_message(buffer, MessageType.REQUEST)
                     if request_message is not None:
                         break
-                #print_summary(parsed_message, addr[0])
                 host, port = parse_uri(request_message['uri'])
-                #print('\n')
-                #print('Target: {}'.format(host))
-                #print('Port: {}\n'.format(port))
                 message_header, rebuilt = build_message(request_message, body)
-                #print(rebuilt)
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                    s2.connect((host, port))
-                    s2.sendall(rebuilt)
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as response_socket:
+                    response_socket.connect((host, port))
+                    response_socket.sendall(rebuilt)
                     buffer = b''
                     while True:
-                        raw = s2.recv(4096)
+                        raw = response_socket.recv(4096)
                         if not raw:
                             break
                         buffer = buffer + raw
                         response_message, remainder, body = parse_message(buffer, MessageType.RESPONSE)
                         if response_message is not None:
                             break
-                    #print('Response: {}'.format(buffer))
                     dt = datetime.datetime.now().strftime('%d/%b/%Y:%H:%M:%S')
                     length, res_fields = get_fields(buffer)
-                    #print('\n')
                     content_length = 0
                     content_length = response_message['Content-Length']
                     referer = '-'
@@ -175,8 +169,8 @@ def main():
                         referer = request_message['headers']['Referer']
                     user_agent = '-'
                     if 'User-Agent' in request_message['headers']:
-                        user_agent = request_message['headers']['User-Agent']
-                    print(response(addr[0], dt, message_header, res_fields.split(' ', 2)[1], content_length, referer, user_agent.strip()))
+                        user_agent = request_message['headers']['User-Agent'].strip()
+                    print(access_log(addr[0], dt, message_header, res_fields.split(' ', 2)[1], content_length, referer, user_agent))
                 message_header, rebuilt = build_message(response_message, body)
                 conn.sendall(rebuilt)
 
