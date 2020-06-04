@@ -70,7 +70,7 @@ def parse_message(data, message_type):
             message['Content-Length'] = content_length
         return message, None, body
     except Exception as E:
-        print(E)
+        # print(E)
         return None, data, None
 
 def print_summary(message,  address):
