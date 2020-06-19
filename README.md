@@ -16,6 +16,7 @@ To test:
 - Under Configure Proxy Access to the Internet, select Manual proxy configuration
 - Set the HTTP Proxy to 127.0.0.1 with Port 9999 (match the port you used to run your proxy)
 - Apply your settings and open a new tab to navigate to an HTTP-based site, e.g.,
-http://www.washington.edu/
-http://neverssl.com
-http://mit.edu
+
+http://www.washington.edu/ <br>
+http://neverssl.com  <br>
+http://mit.edu <br>
